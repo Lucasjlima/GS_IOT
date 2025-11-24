@@ -89,6 +89,7 @@ O dispositivo ESP32 publica periodicamente um pacote JSON no tópico MQTT. O Fro
   "alerta": "Normal"
 }
 
+```
 
 ## 🧪 Testes Realizados
 
