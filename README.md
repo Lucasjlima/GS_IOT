@@ -119,10 +119,7 @@ Para validar a solução, siga o roteiro de testes no Wokwi:
 
 ## 🔗 Links
 
-# https://youtu.be/XTzzVgxmQsU
-
-- **Vídeo de Demonstração**: [Insira o link do YouTube aqui]
-- **Simulação Wokwi**: [Insira o link do projeto Wokwi aqui, se houver]
+- **Vídeo de Demonstração**: https://youtu.be/XTzzVgxmQsU
 
 > Projeto desenvolvido para a disciplina de **Disruptive Architectures - FIAP**.
 ```
