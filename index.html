@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BalanceMe IoT Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Paho MQTT -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f3f4f6;
+        }
+
+        .card {
+            @apply bg-white p-6 rounded-xl shadow-md;
+        }
+    </style>
+</head>
+
+<body class="p-6">
+
+    <!-- Header -->
+    <header class="mb-8 text-center md:text-left md:flex md:justify-between md:items-center max-w-6xl mx-auto">
+        <div>
+            <h1 class="text-3xl font-bold text-teal-600"><i class="fas fa-leaf mr-2"></i>BalanceMe</h1>
+            <p class="text-gray-500">Monitoramento de Bem-Estar & Futuro do Trabalho</p>
+        </div>
+        <div id="connectionStatus"
+            class="mt-4 md:mt-0 px-4 py-2 bg-red-100 text-red-600 rounded-full font-semibold text-sm">
+            Desconectado
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <!-- BPM Card -->
+        <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
+            <div class="flex justify-between items-center">
+                <h2 class="text-gray-500 uppercase text-xs font-bold tracking-wider">Batimentos (Simulado)</h2>
+                <i class="fas fa-heartbeat text-red-500 text-xl"></i>
+            </div>
+            <div class="mt-4 flex items-end">
+                <span id="bpmValue" class="text-4xl font-bold text-gray-800">--</span>
+                <span class="ml-2 text-gray-500 mb-1">BPM</span>
+            </div>
+        </div>
+
+        <!-- Temperatura Card -->
+        <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
+            <div class="flex justify-between items-center">
+                <h2 class="text-gray-500 uppercase text-xs font-bold tracking-wider">Temperatura (Ambiente)</h2>
+                <i class="fas fa-temperature-high text-orange-500 text-xl"></i>
+            </div>
+            <div class="mt-4 flex items-end">
+                <span id="tempValue" class="text-4xl font-bold text-gray-800">--</span>
+                <span class="ml-2 text-gray-500 mb-1">°C</span>
+            </div>
+        </div>
+
+        <!-- Umidade Card -->
+        <div class="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500">
+            <div class="flex justify-between items-center">
+                <h2 class="text-gray-500 uppercase text-xs font-bold tracking-wider">Umidade</h2>
+                <i class="fas fa-tint text-blue-500 text-xl"></i>
+            </div>
+            <div class="mt-4 flex items-end">
+                <span id="humValue" class="text-4xl font-bold text-gray-800">--</span>
+                <span class="ml-2 text-gray-500 mb-1">%</span>
+            </div>
+        </div>
+
+        <!-- Alertas & Status -->
+        <div class="col-span-1 md:col-span-3 bg-white p-6 rounded-xl shadow-md">
+            <h3 class="font-bold text-gray-700 mb-2">Status do Usuário</h3>
+            <div id="alertBox"
+                class="p-4 bg-green-100 text-green-800 rounded-lg border border-green-200 flex items-center">
+                <i class="fas fa-check-circle mr-3"></i>
+                <span id="alertText">Aguardando dados...</span>
+            </div>
+        </div>
+
+        <!-- Gráfico -->
+        <div class="col-span-1 md:col-span-3 bg-white p-6 rounded-xl shadow-md">
+            <h3 class="font-bold text-gray-700 mb-4">Histórico em Tempo Real</h3>
+            <canvas id="mainChart" height="100"></canvas>
+        </div>
+    </main>
+
+    <script>
+        // --- Configuração MQTT ---
+        const broker = "broker.hivemq.com";
+        const port = 8000; // Porta WebSocket do HiveMQ
+        const topic = "balanceme/fiap/data";
+        const clientID = "web_client_" + Math.random().toString(16).substr(2, 8);
+
+        // --- Configuração do Gráfico (Chart.js) ---
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        const maxDataPoints = 20;
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'BPM', data: [], borderColor: '#ef4444', tension: 0.4 },
+                    { label: 'Temp (°C)', data: [], borderColor: '#f97316', tension: 0.4 }
+                ]
+            },
+            options: { responsive: true, animation: false }
+        });
+
+        // --- Funções MQTT ---
+        const client = new Paho.MQTT.Client(broker, port, clientID);
+
+        client.onConnectionLost = function (responseObject) {
+            console.log("Conexão perdida: " + responseObject.errorMessage);
+            document.getElementById('connectionStatus').innerText = "Desconectado";
+            document.getElementById('connectionStatus').className = "mt-4 md:mt-0 px-4 py-2 bg-red-100 text-red-600 rounded-full font-semibold text-sm";
+        };
+
+        client.onMessageArrived = function (message) {
+            console.log("Chegou mensagem: " + message.payloadString);
+            try {
+                const data = JSON.parse(message.payloadString);
+                updateDashboard(data);
+            } catch (e) {
+                console.error("Erro ao ler JSON", e);
+            }
+        };
+
+        function connect() {
+            client.connect({
+                onSuccess: function () {
+                    console.log("Conectado ao Broker!");
+                    document.getElementById('connectionStatus').innerText = "Conectado via MQTT";
+                    document.getElementById('connectionStatus').className = "mt-4 md:mt-0 px-4 py-2 bg-green-100 text-green-600 rounded-full font-semibold text-sm";
+                    client.subscribe(topic);
+                },
+                onFailure: function (e) {
+                    console.log("Falha na conexão: " + e.errorMessage);
+                }
+            });
+        }
+
+        function updateDashboard(data) {
+            // Atualizar Cards
+            document.getElementById('bpmValue').innerText = data.bpm;
+            document.getElementById('tempValue').innerText = data.temperatura.toFixed(1);
+            document.getElementById('humValue').innerText = data.umidade.toFixed(1);
+
+            // Atualizar Alerta
+            const alertBox = document.getElementById('alertBox');
+            const alertText = document.getElementById('alertText');
+            alertText.innerText = data.alerta;
+
+            if (data.alerta !== "Normal") {
+                alertBox.className = "p-4 bg-red-100 text-red-800 rounded-lg border border-red-200 flex items-center animate-pulse";
+            } else {
+                alertBox.className = "p-4 bg-green-100 text-green-800 rounded-lg border border-green-200 flex items-center";
+            }
+
+            // Atualizar Gráfico
+            const now = new Date().toLocaleTimeString();
+            if (chart.data.labels.length > maxDataPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                chart.data.datasets[1].data.shift();
+            }
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(data.bpm);
+            chart.data.datasets[1].data.push(data.temperatura);
+            chart.update();
+        }
+
+        // Iniciar
+        connect();
+    </script>
+</body>
+
+</html>
